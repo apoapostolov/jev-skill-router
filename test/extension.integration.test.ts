@@ -28,6 +28,7 @@ interface HarnessOptions {
   jevClient?: JevClientLike;
   jevFailure?: "malformed" | "timeout";
   withClient?: boolean;
+  priorPromptOverride?: boolean;
 }
 
 interface Harness {
@@ -149,6 +150,7 @@ async function makeHarness(t: test.TestContext, options: HarnessOptions = {}): P
     noPromptTemplates: true,
     noThemes: true,
     extensionFactories: [pi => {
+      if (options.priorPromptOverride) pi.on("before_agent_start", event => ({ systemPrompt: `${event.systemPrompt}\nPRIOR_PROMPT_MARKER` }));
       const recordingApi = new Proxy(pi, {
         get(target, property, receiver) {
           if (property === "getCommands") return () => {
@@ -254,6 +256,23 @@ test("Pi filters only the structured skill section, scans all hidden skills, and
   assert.equal(result.messages[0]?.customType, "jev-skill-router");
   assert.equal(harness.interpreterCalls.length, 1);
   assert.equal(harness.interpreterCalls[0]?.reasoning, "low");
+});
+
+test("a prior prompt override still sends only visible skills to the model", async t => {
+  const harness = await makeHarness(t, { skillCount: 12, visibleCount: 1, priorPromptOverride: true });
+  const skipped = await beforeAgentStart(harness, "つまり？");
+  assert.equal(skipped.messages.length, 0);
+  assert.match(skipped.systemPromptOptions.forceSystemPrompt ?? "", /PRIOR_PROMPT_MARKER/);
+  assert.doesNotMatch(skipped.systemPromptOptions.forceSystemPrompt ?? "", /<name>hidden-001<\/name>/);
+
+  const result = await beforeAgentStart(harness, "Improve keyboard accessibility of the dashboard");
+  const sent = result.systemPromptOptions.forceSystemPrompt;
+  assert.ok(sent);
+  assert.deepEqual(result.systemPromptOptions.skills.map(skill => skill.name), ["hidden-000"]);
+  assert.match(sent, /PRIOR_PROMPT_MARKER/);
+  assert.match(sent, /<name>hidden-000<\/name>/);
+  assert.doesNotMatch(sent, /<name>hidden-001<\/name>/);
+  assert.equal(result.messages[0]?.customType, "jev-skill-router");
 });
 
 test("an all-unknown visible list keeps the native catalog, skips automatic routing, and warns safely", async t => {

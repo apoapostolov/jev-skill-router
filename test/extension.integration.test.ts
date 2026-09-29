@@ -29,6 +29,7 @@ interface HarnessOptions {
   jevFailure?: "malformed" | "timeout";
   withClient?: boolean;
   priorPromptOverride?: boolean;
+  skillDescriptions?: Record<string, string>;
 }
 
 interface Harness {
@@ -83,7 +84,8 @@ async function makeHarness(t: test.TestContext, options: HarnessOptions = {}): P
     const directory = join(skillsDir, name);
     await mkdir(directory, { recursive: true });
     const manual = options.manualOnly?.includes(Number(name.slice(-3))) ? "disable-model-invocation: true\n" : "";
-    await writeFile(join(directory, "SKILL.md"), `---\nname: ${name}\ndescription: Instructions for ${name}\n${manual}---\nBody for ${name}: keyboard accessibility and React dashboard guidance.\n`);
+    const description = options.skillDescriptions?.[name] ?? `Instructions for ${name}`;
+    await writeFile(join(directory, "SKILL.md"), `---\nname: ${name}\ndescription: ${JSON.stringify(description)}\n${manual}---\nBody for ${name}: keyboard accessibility and React dashboard guidance.\n`);
   }));
   await writeFile(join(configDir, "jev-skill-router.json"), JSON.stringify({
     visibleSkills: options.visibleSkills ?? skillNames.slice(0, visibleCount),
@@ -273,6 +275,23 @@ test("a prior prompt override still sends only visible skills to the model", asy
   assert.match(sent, /<name>hidden-000<\/name>/);
   assert.doesNotMatch(sent, /<name>hidden-001<\/name>/);
   assert.equal(result.messages[0]?.customType, "jev-skill-router");
+});
+
+test("forced skill rewrite keeps dollar sequences in skill descriptions", async t => {
+  const description = "echo $$ and $& and $'pid' and $` and $1";
+  const harness = await makeHarness(t, {
+    skillCount: 12,
+    visibleCount: 1,
+    priorPromptOverride: true,
+    skillDescriptions: { "hidden-000": description }
+  });
+  const skipped = await beforeAgentStart(harness, "つまり？");
+  const sent = skipped.systemPromptOptions.forceSystemPrompt ?? "";
+  assert.match(sent, /PRIOR_PROMPT_MARKER/);
+  assert.match(sent, /<name>hidden-000<\/name>/);
+  assert.equal(sent.includes("$$"), true);
+  assert.equal(sent.includes("$&apos;pid&apos;"), true);
+  assert.doesNotMatch(sent, /<name>hidden-001<\/name>/);
 });
 
 test("an all-unknown visible list keeps the native catalog, skips automatic routing, and warns safely", async t => {

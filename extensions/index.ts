@@ -24,7 +24,7 @@ const SKILLS_SECTION_PATTERN = /The following skills provide specialized instruc
 
 function rewriteForcedSkillSection(prompt: string | undefined, skills: Skill[]): string | undefined {
   if (prompt === undefined) return undefined;
-  const next = prompt.replace(SKILLS_SECTION_PATTERN, formatSkillsForPrompt(skills).trimStart());
+  const next = prompt.replace(SKILLS_SECTION_PATTERN, () => formatSkillsForPrompt(skills).trimStart());
   return next === prompt ? undefined : next;
 }
 
